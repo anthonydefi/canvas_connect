@@ -138,6 +138,14 @@ async def list_tools() -> list[Tool]:
                 "required": ["user_id"],
             },
         ),
+        Tool(
+            name="get_grade_summary",
+            description="Get a summary of all students with their current total grade/score in the course",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
 
         # Announcement tools
         Tool(
@@ -278,19 +286,105 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text="\n---\n".join(result) if result else "No students found")]
 
         elif name == "get_student_grades":
-            user = course.get_user(arguments["user_id"])
-            enrollments = course.get_enrollment(arguments["user_id"])
-
-            result = [f"Student: {user.name}\n"]
-
+            user_id = arguments["user_id"]
+            user = course.get_user(user_id)
+            
+            # Get enrollment with grades
+            enrollments = course.get_enrollments(user_id=[user_id], include=['current_points', 'current_score'])
+            enrollment = None
+            for enroll in enrollments:
+                if enroll.user_id == user_id and enroll.type == 'StudentEnrollment':
+                    enrollment = enroll
+                    break
+            
+            result = [f"Student: {user.name}"]
+            
+            # Add overall grade if available
+            if enrollment:
+                current_score = getattr(enrollment, 'grades', {}).get('current_score', 'N/A')
+                final_score = getattr(enrollment, 'grades', {}).get('final_score', 'N/A')
+                result.append(f"Current Score: {current_score}%")
+                result.append(f"Final Score: {final_score}%")
+                result.append("")
+            
+            # Get individual assignment grades
             assignments = course.get_assignments()
+            result.append("Assignment Grades:")
             for assignment in assignments:
                 try:
-                    submission = assignment.get_submission(arguments["user_id"])
-                    score = getattr(submission, 'score', 'Not graded')
-                    result.append(f"{assignment.name}: {score}/{assignment.points_possible}")
-                except:
-                    result.append(f"{assignment.name}: No submission")
+                    submission = assignment.get_submission(user_id)
+                    score = getattr(submission, 'score', None)
+                    points_possible = getattr(assignment, 'points_possible', 0)
+                    if score is not None:
+                        result.append(f"  {assignment.name}: {score}/{points_possible}")
+                    else:
+                        result.append(f"  {assignment.name}: Not graded")
+                except Exception:
+                    result.append(f"  {assignment.name}: No submission")
+
+            return [TextContent(type="text", text="\n".join(result))]
+
+        elif name == "get_grade_summary":
+            students = course.get_users(enrollment_type=["student"])
+            student_list = list(students)
+
+            if not student_list:
+                return [TextContent(type="text", text="No students found in the course")]
+
+            # Get enrollments with grades for all students
+            user_ids = [s.id for s in student_list]
+            enrollments = course.get_enrollments(
+                type=["StudentEnrollment"],
+                include=["current_points", "total_scores"]
+            )
+
+            # Build a map of user_id to enrollment grades
+            enrollment_map = {}
+            for enrollment in enrollments:
+                if enrollment.type == "StudentEnrollment":
+                    enrollment_map[enrollment.user_id] = enrollment
+
+            result = ["=" * 60]
+            result.append("STUDENT GRADE SUMMARY")
+            result.append("=" * 60)
+            result.append("")
+
+            # Sort students by name
+            student_list.sort(key=lambda s: s.name)
+
+            for student in student_list:
+                enrollment = enrollment_map.get(student.id)
+
+                if enrollment and hasattr(enrollment, 'grades'):
+                    grades = enrollment.grades
+                    current_score = grades.get('current_score', 'N/A')
+                    current_grade = grades.get('current_grade', '')
+                    final_score = grades.get('final_score', 'N/A')
+                    final_grade = grades.get('final_grade', '')
+
+                    # Format the score display
+                    score_display = f"{current_score}%" if current_score != 'N/A' else "N/A"
+                    if current_grade:
+                        score_display += f" ({current_grade})"
+
+                    final_display = f"{final_score}%" if final_score != 'N/A' else "N/A"
+                    if final_grade:
+                        final_display += f" ({final_grade})"
+
+                    result.append(f"Student: {student.name}")
+                    result.append(f"  ID: {student.id}")
+                    result.append(f"  Current Score: {score_display}")
+                    result.append(f"  Final Score: {final_display}")
+                else:
+                    result.append(f"Student: {student.name}")
+                    result.append(f"  ID: {student.id}")
+                    result.append(f"  Current Score: No grades available")
+
+                result.append("")
+
+            result.append("=" * 60)
+            result.append(f"Total Students: {len(student_list)}")
+            result.append("=" * 60)
 
             return [TextContent(type="text", text="\n".join(result))]
 
