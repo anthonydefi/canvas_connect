@@ -6,6 +6,149 @@ from typing import Any
 from datetime import datetime
 
 from mcp.server import Server
+
+# Rubrics for assignments
+RUBRICS = {
+    1027200: {  # Introductions: Are You Google or Microsoft? Android or iPhone?
+        "assignment_name": "Introductions: Are You Google or Microsoft? Android or iPhone?",
+        "total_points": 100,
+        "dimensions": [
+            {
+                "name": "Quality",
+                "max_points": 25,
+                "level_exemplars": {
+                    "25": ["Great - Initial post is appropriate and meets word count of 350 words. Post is thoughtful and reflective"],
+                    "15": ["Good - Initial post word count less than 350 words."],
+                    "10": ["Fair - The post is perfunctory, does not contain any personal experience, leaves little room for more conversation."],
+                    "0": ["Unacceptable - No posting"]
+                }
+            },
+            {
+                "name": "Engagement",
+                "max_points": 25,
+                "level_exemplars": {
+                    "25": ["Great - Aware of the needs to interact with fellow students; attempts to motivate the group discussion; presents creative approaches to the topics. Interacts freely. Responds to more than the minimum number of colleagues."],
+                    "15": ["Good - Presents relevant viewpoints for consideration by group; responds to at least 1 colleague."],
+                    "10": ["Fair - Responses to 1 or 2 colleagues is perfunctory and does not add value to the conversation."],
+                    "0": ["Poor - No feedback provided to fellow students."]
+                }
+            },
+            {
+                "name": "Relevance",
+                "max_points": 25,
+                "level_exemplars": {
+                    "25": ["Great - Initial post is in response to the provided topics and prompts further discussion or inquiry."],
+                    "15": ["Good - The initial post just addressed the topics provided with close-ended responses."],
+                    "10": ["Fair - Not all of the topics provided were addressed or some of the responses were not relevant."],
+                    "0": ["Unacceptable - There was no initial posting or none of the responses were relevant to the topics provided."]
+                }
+            },
+            {
+                "name": "Mechanics",
+                "max_points": 25,
+                "level_exemplars": {
+                    "25": ["Great - Clear and articulate; grammar, punctuation, and spelling are correct."],
+                    "15": ["Good - Contains minor errors that don't cloud meaning and very few (if any) mechanical errors."],
+                    "10": ["Fair - Contains several proofing errors or uses text-messaging shortcuts, making the post hard to follow."],
+                    "0": ["Poor - Contains multiple mechanical errors (spelling, grammar, and punctuation); the post is sloppy and uses text-messaging shortcuts; meaning of the post is hard to understand, or there is no initial post."]
+                }
+            }
+        ]
+    },
+    1027188: {  # DISCUSS: The IoT Discussion
+        "assignment_name": "The IoT Discussion",
+        "total_points": 100,
+        "dimensions": [
+            {
+                "name": "Initial Post",
+                "max_points": 20,
+                "level_exemplars": {
+                    "20": ["Great - Initial post is appropriate, meets word count of 300 words, and is free of errors."],
+                    "12": ["Good - Initial post is appropriate, meets the word count, but multiple errors are evident."],
+                    "5": ["Fair - The initial post does not meet the word count of 300 words and/or errors are too prevalent to read content."],
+                    "0": ["Unacceptable - No posting."]
+                }
+            },
+            {
+                "name": "Response",
+                "max_points": 24,
+                "level_exemplars": {
+                    "24": ["Great - Answered all questions in initial post."],
+                    "18": ["Good - Answered 3 questions in the initial post."],
+                    "12": ["Fair - Answered two of the questions in the initial post."],
+                    "6": ["Fair - Answered 1 question in the initial post."],
+                    "0": ["Poor - Has an initial post, but none of the questions are addressed."]
+                }
+            },
+            {
+                "name": "Thoroughness of Response",
+                "max_points": 32,
+                "level_exemplars": {
+                    "32": ["Great - All 4 questions were answered, and the responses were very well thought out."],
+                    "24": ["Good - Only 3 questions were answered, but the responses were very well thought out OR all questions were answered, but only 3 had thoughtful answers."],
+                    "16": ["Fair - Only 2 questions were answered, but the responses were very well thought out OR all questions were answered, but only 2 had thoughtful answers."],
+                    "8": ["Fair - Only 1 question was answered, but the response was very well thought out OR all questions were answered, but only 1 had a thoughtful answer."],
+                    "0": ["Poor - No questions were addressed OR all questions had substandard answers."]
+                }
+            },
+            {
+                "name": "Replies",
+                "max_points": 24,
+                "level_exemplars": {
+                    "24": ["Great - Replied to at least 2 colleagues"],
+                    "12": ["Good - Replied to only 1 colleague"],
+                    "0": ["Poor - Didn't reply to anyone."]
+                }
+            }
+        ]
+    },
+    1027194: {  # AI in our Future: A Student's Beginning Guide to Artificial Intelligence
+        "assignment_name": "AI in our Future: A Student's Beginning Guide to Artificial Intelligence",
+        "total_points": 100,
+        "dimensions": [
+            {
+                "name": "Quality",
+                "max_points": 25,
+                "level_exemplars": {
+                    "25": ["Great - Initial post is appropriate and meets word count of 350 words. Post is thoughtful and reflective"],
+                    "15": ["Good - Initial post word count less than 350 words."],
+                    "10": ["Fair - The post is perfunctory, does not contain any personal experience, leaves little room for more conversation."],
+                    "0": ["Unacceptable - No posting."]
+                }
+            },
+            {
+                "name": "Relevance",
+                "max_points": 25,
+                "level_exemplars": {
+                    "25": ["Great - Initial post is in response to the provided topics and prompts further discussion or inquiry."],
+                    "15": ["Good - The initial post just addressed the topics provided with close-ended responses."],
+                    "10": ["Fair - Not all of the topics provided were addressed or some of the responses were not relevant."],
+                    "0": ["Poor - There was no initial posting or none of the responses were relevant to the topics provided."]
+                }
+            },
+            {
+                "name": "Engagement",
+                "max_points": 25,
+                "level_exemplars": {
+                    "25": ["Great - Aware of the needs to interact with fellow students; attempts to motivate the group discussion; presents creative approaches to the topics. Interacts freely. Responds to more than the minimum number of colleagues."],
+                    "15": ["Good - Presents relevant viewpoints for consideration by group; responds to at least 1 colleague."],
+                    "10": ["Fair - Responses to 1 or 2 colleagues is perfunctory and does not add value to the conversation."],
+                    "0": ["Unacceptable - There was no initial posting or none of the responses were relevant to the topics provided."]
+                }
+            },
+            {
+                "name": "Mechanics",
+                "max_points": 25,
+                "level_exemplars": {
+                    "25": ["Great - Clear and articulate; grammar, punctuation, and spelling are correct."],
+                    "15": ["Good - Contains minor errors that don't cloud meaning and very few (if any) mechanical errors."],
+                    "10": ["Fair - Contains several proofing errors or uses text-messaging shortcuts, making the post hard to follow."],
+                    "0": ["Poor - Contains multiple mechanical errors (spelling, grammar, and punctuation); the post is sloppy and uses text-messaging shortcuts; meaning of the post is hard to understand, or there is no initial post."]
+                }
+            }
+        ]
+    }
+}
 from mcp.types import (
     Tool,
     TextContent,
@@ -202,6 +345,19 @@ async def list_tools() -> list[Tool]:
                     "published": {"type": "boolean", "description": "Whether to publish immediately", "default": False},
                 },
                 "required": ["name"],
+            },
+        ),
+
+        # Rubric tools
+        Tool(
+            name="get_rubric",
+            description="Get the grading rubric for a specific assignment. Returns the rubric criteria, point values, and level descriptions to use when grading.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "assignment_id": {"type": "number", "description": "Assignment ID to get rubric for"},
+                },
+                "required": ["assignment_id"],
             },
         ),
     ]
@@ -449,6 +605,29 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 type="text",
                 text=f"Module created successfully!\nID: {module.id}\nName: {module.name}"
             )]
+
+        # Rubric tools
+        elif name == "get_rubric":
+            assignment_id = arguments["assignment_id"]
+            if assignment_id in RUBRICS:
+                rubric = RUBRICS[assignment_id]
+                result = []
+                result.append(f"RUBRIC: {rubric['assignment_name']}")
+                result.append(f"Total Points: {rubric['total_points']}")
+                result.append("=" * 60)
+
+                for dimension in rubric["dimensions"]:
+                    result.append(f"\n{dimension['name']} (Max: {dimension['max_points']} points)")
+                    result.append("-" * 40)
+                    # Sort levels by points descending
+                    for points in sorted(dimension["level_exemplars"].keys(), key=int, reverse=True):
+                        descriptions = dimension["level_exemplars"][points]
+                        result.append(f"  {points} pts: {descriptions[0]}")
+
+                result.append("\n" + "=" * 60)
+                return [TextContent(type="text", text="\n".join(result))]
+            else:
+                return [TextContent(type="text", text=f"No rubric found for assignment ID {assignment_id}")]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
