@@ -360,6 +360,20 @@ async def list_tools() -> list[Tool]:
                 "required": ["assignment_id"],
             },
         ),
+
+        # Discussion tools
+        Tool(
+            name="get_discussion_posts",
+            description="Get all posts and replies for a discussion topic. Returns the initial posts from each student and their replies to other students, with word counts.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topic_id": {"type": "number", "description": "Discussion topic ID (same as assignment ID for graded discussions)"},
+                    "user_id": {"type": "number", "description": "Optional: Filter to show only posts from a specific student"},
+                },
+                "required": ["topic_id"],
+            },
+        ),
     ]
 
 
@@ -628,6 +642,113 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 return [TextContent(type="text", text="\n".join(result))]
             else:
                 return [TextContent(type="text", text=f"No rubric found for assignment ID {assignment_id}")]
+
+        # Discussion tools
+        elif name == "get_discussion_posts":
+            import re
+            topic_id = arguments["topic_id"]
+            user_id_filter = arguments.get("user_id")
+
+            # Get the discussion topic
+            topic = course.get_discussion_topic(topic_id)
+
+            result = []
+            result.append(f"DISCUSSION: {topic.title}")
+            result.append("=" * 60)
+
+            # Get all entries (posts) for this topic
+            entries = topic.get_topic_entries()
+
+            # Build a map of user_id to user name for efficiency
+            user_cache = {}
+
+            def get_user_name(uid):
+                if uid not in user_cache:
+                    try:
+                        user = course.get_user(uid)
+                        user_cache[uid] = user.name
+                    except Exception:
+                        user_cache[uid] = f"User {uid}"
+                return user_cache[uid]
+
+            def strip_html(text):
+                """Remove HTML tags from text."""
+                if not text:
+                    return ""
+                clean = re.sub(r'<[^>]+>', '', text)
+                return clean.strip()
+
+            def count_words(text):
+                """Count words in text."""
+                if not text:
+                    return 0
+                clean_text = strip_html(text)
+                return len(clean_text.split())
+
+            # Process each top-level entry
+            for entry in entries:
+                entry_user_id = getattr(entry, 'user_id', None)
+
+                # Skip if filtering by user and this isn't their post
+                if user_id_filter and entry_user_id != user_id_filter:
+                    # But still check replies for this user
+                    pass
+
+                user_name = get_user_name(entry_user_id) if entry_user_id else "Unknown"
+                message = getattr(entry, 'message', '')
+                word_count = count_words(message)
+                created_at = getattr(entry, 'created_at', 'Unknown date')
+
+                # Only show this entry if no filter or matches filter
+                if not user_id_filter or entry_user_id == user_id_filter:
+                    result.append(f"\n{'─' * 60}")
+                    result.append(f"STUDENT: {user_name} (ID: {entry_user_id})")
+                    result.append(f"Posted: {created_at}")
+                    result.append(f"Word Count: {word_count}")
+                    result.append(f"{'─' * 40}")
+                    result.append(f"INITIAL POST:")
+                    result.append(strip_html(message) if message else "(No content)")
+
+                # Get replies to this entry
+                try:
+                    replies = entry.get_replies()
+                    reply_count = 0
+                    for reply in replies:
+                        reply_user_id = getattr(reply, 'user_id', None)
+
+                        # If filtering, only show replies from that user
+                        if user_id_filter and reply_user_id != user_id_filter:
+                            continue
+
+                        reply_user_name = get_user_name(reply_user_id) if reply_user_id else "Unknown"
+                        reply_message = getattr(reply, 'message', '')
+                        reply_word_count = count_words(reply_message)
+                        reply_created_at = getattr(reply, 'created_at', 'Unknown date')
+
+                        if not user_id_filter or entry_user_id == user_id_filter:
+                            # Show as reply under the original post
+                            result.append(f"\n  ↳ REPLY from {reply_user_name} (ID: {reply_user_id})")
+                            result.append(f"    Posted: {reply_created_at} | Words: {reply_word_count}")
+                            result.append(f"    {strip_html(reply_message)[:500]}{'...' if len(strip_html(reply_message)) > 500 else ''}")
+                        elif reply_user_id == user_id_filter:
+                            # This is a reply FROM the filtered user to someone else's post
+                            result.append(f"\n{'─' * 60}")
+                            result.append(f"REPLY by {reply_user_name} (ID: {reply_user_id})")
+                            result.append(f"In response to: {user_name}'s post")
+                            result.append(f"Posted: {reply_created_at} | Words: {reply_word_count}")
+                            result.append(f"{'─' * 40}")
+                            result.append(strip_html(reply_message) if reply_message else "(No content)")
+
+                        reply_count += 1
+
+                    if not user_id_filter or entry_user_id == user_id_filter:
+                        if reply_count == 0:
+                            result.append(f"\n  (No replies to this post)")
+                except Exception as e:
+                    logger.debug(f"Could not get replies for entry: {e}")
+
+            result.append(f"\n{'=' * 60}")
+            return [TextContent(type="text", text="\n".join(result))]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
