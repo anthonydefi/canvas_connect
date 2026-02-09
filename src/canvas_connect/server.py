@@ -2,10 +2,18 @@
 
 import os
 import logging
+import re
 from typing import Any
 from datetime import datetime
+from pathlib import Path
 
+from dotenv import load_dotenv
+import anthropic
 from mcp.server import Server
+
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(env_path)
 
 # Rubrics for assignments
 RUBRICS = {
@@ -374,6 +382,20 @@ async def list_tools() -> list[Tool]:
                 "required": ["topic_id"],
             },
         ),
+
+        # AI Detection tools
+        Tool(
+            name="check_ai_writing",
+            description="Analyze a student's discussion post to detect if it was likely written by AI. Returns a likelihood assessment and indicators.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topic_id": {"type": "number", "description": "Discussion topic ID"},
+                    "user_id": {"type": "number", "description": "Student user ID to check"},
+                },
+                "required": ["topic_id", "user_id"],
+            },
+        ),
     ]
 
 
@@ -645,7 +667,6 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         # Discussion tools
         elif name == "get_discussion_posts":
-            import re
             topic_id = arguments["topic_id"]
             user_id_filter = arguments.get("user_id")
 
@@ -748,6 +769,97 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     logger.debug(f"Could not get replies for entry: {e}")
 
             result.append(f"\n{'=' * 60}")
+            return [TextContent(type="text", text="\n".join(result))]
+
+        # AI Detection tools
+        elif name == "check_ai_writing":
+            topic_id = arguments["topic_id"]
+            user_id = arguments["user_id"]
+
+            # Get the discussion topic and find the student's post
+            topic = course.get_discussion_topic(topic_id)
+            entries = topic.get_topic_entries()
+
+            def strip_html(text):
+                """Remove HTML tags from text."""
+                if not text:
+                    return ""
+                clean = re.sub(r'<[^>]+>', '', text)
+                return clean.strip()
+
+            # Find the student's post
+            student_post = None
+            student_name = None
+            for entry in entries:
+                if getattr(entry, 'user_id', None) == user_id:
+                    student_post = strip_html(getattr(entry, 'message', ''))
+                    try:
+                        user = course.get_user(user_id)
+                        student_name = user.name
+                    except Exception:
+                        student_name = f"User {user_id}"
+                    break
+
+            if not student_post:
+                return [TextContent(type="text", text=f"No post found for user ID {user_id} in this discussion.")]
+
+            # Use Claude to analyze the text
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                return [TextContent(type="text", text="Error: ANTHROPIC_API_KEY environment variable not set.")]
+
+            client = anthropic.Anthropic(api_key=api_key)
+
+            analysis_prompt = f"""Analyze the following student discussion post and assess whether it was likely written by AI (like ChatGPT, Claude, etc.) or by a human student.
+
+Consider these factors:
+1. Writing style - Is it overly formal, generic, or lacks personal voice?
+2. Structure - Does it follow a rigid template (intro, body, conclusion) typical of AI?
+3. Phrases - Are there AI-typical phrases like "In conclusion," "It's important to note," "Overall," "That being said"?
+4. Personal details - Does it include specific personal anecdotes or experiences that feel authentic?
+5. Errors - Does it have natural human errors or typos that AI typically wouldn't make?
+6. Vocabulary - Is the vocabulary consistent with a student or unusually sophisticated?
+7. Hedging language - Excessive use of "I believe," "In my opinion," "I think" can be AI indicators
+
+STUDENT POST:
+\"\"\"
+{student_post}
+\"\"\"
+
+Provide your analysis in this format:
+LIKELIHOOD: [Low/Medium/High] likelihood of AI-generated content
+CONFIDENCE: [Low/Medium/High] confidence in this assessment
+
+KEY INDICATORS:
+- [List 3-5 specific observations from the text]
+
+SUMMARY: [2-3 sentence summary of your analysis]"""
+
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1024,
+                messages=[
+                    {"role": "user", "content": analysis_prompt}
+                ]
+            )
+
+            analysis_result = message.content[0].text
+
+            result = []
+            result.append(f"AI WRITING ANALYSIS")
+            result.append("=" * 60)
+            result.append(f"Student: {student_name} (ID: {user_id})")
+            result.append(f"Discussion: {topic.title}")
+            result.append(f"Post Length: {len(student_post.split())} words")
+            result.append("=" * 60)
+            result.append("")
+            result.append(analysis_result)
+            result.append("")
+            result.append("=" * 60)
+            result.append("NOTE: This is an AI-based assessment and should be used")
+            result.append("as one factor among many when evaluating student work.")
+            result.append("=" * 60)
+
             return [TextContent(type="text", text="\n".join(result))]
 
         else:
