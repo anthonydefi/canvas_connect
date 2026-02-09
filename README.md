@@ -24,6 +24,11 @@ A Model Context Protocol (MCP) server for managing Canvas LMS courses. This serv
 - View module contents and items
 - Create new modules
 
+### Discussion & Grading Tools
+- View discussion posts and replies with word counts
+- Get grading rubrics for assignments
+- AI writing detection to check for AI-generated student submissions
+
 ## Setup
 
 ### 1. Install Dependencies
@@ -66,9 +71,23 @@ Edit `.env` with your information:
 CANVAS_API_URL=https://your-institution.instructure.com
 CANVAS_API_TOKEN=your_api_token_here
 CANVAS_COURSE_ID=your_course_id_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here  # Required for AI detection feature
 ```
 
-### 5. Configure Claude Desktop
+### 5. Get Anthropic API Key (Optional - for AI Detection)
+
+The AI writing detection feature requires an Anthropic API key:
+
+1. Go to [console.anthropic.com](https://console.anthropic.com/)
+2. Create an account or log in
+3. Navigate to API Keys
+4. Create a new API key
+5. Add credits to your account (Plans & Billing)
+6. Add the key to your `.env` file as `ANTHROPIC_API_KEY`
+
+**Note**: The AI detection feature uses Claude to analyze student posts. Each analysis costs a small amount of API credits.
+
+### 6. Configure Claude Desktop
 
 Add the server to your Claude Desktop configuration file:
 
@@ -93,7 +112,7 @@ Add the server to your Claude Desktop configuration file:
 
 **Important**: Update the paths and credentials with your actual values.
 
-### 6. Restart Claude Desktop
+### 7. Restart Claude Desktop
 
 After saving the configuration, restart Claude Desktop to load the MCP server.
 
@@ -158,6 +177,32 @@ Create a new module.
 - **name** (required): Module name
 - **published**: Whether to publish immediately (default: false)
 
+### Discussion Tools
+
+#### `get_discussion_posts`
+Get all posts and replies for a discussion topic with word counts.
+- **topic_id** (required): Discussion topic ID
+- **user_id**: Optional filter for a specific student's posts
+
+#### `get_rubric`
+Get the grading rubric for a specific assignment.
+- **assignment_id** (required): Assignment ID
+
+### AI Detection Tools
+
+#### `check_ai_writing`
+Analyze a student's discussion post to detect if it was likely written by AI such as ChatGPT or Claude.
+- **topic_id** (required): Discussion topic ID
+- **user_id** (required): Student user ID to check
+
+Returns:
+- Likelihood assessment (Low/Medium/High)
+- Confidence level
+- Key indicators found in the text
+- Summary of the analysis
+
+**Note**: This feature requires an Anthropic API key. See setup instructions above.
+
 ## Example Usage
 
 Once configured, you can ask Claude to help manage your course:
@@ -172,6 +217,9 @@ Once configured, you can ask Claude to help manage your course:
 - "List all modules"
 - "Show me what's in module 5"
 - "Create a new module called 'Week 3: Control Structures'"
+- "Show me all the discussion posts for the Introductions discussion"
+- "Get the rubric for assignment 1027200"
+- "Check if student 127920 used AI to write their discussion post"
 
 ## Security Notes
 
