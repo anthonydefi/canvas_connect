@@ -376,7 +376,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "topic_id": {"type": "number", "description": "Discussion topic ID (same as assignment ID for graded discussions)"},
+                    "topic_id": {"type": "number", "description": "Discussion assignment ID or discussion topic ID (for graded discussions, use the assignment ID)"},
                     "user_id": {"type": "number", "description": "Optional: Filter to show only posts from a specific student"},
                 },
                 "required": ["topic_id"],
@@ -390,7 +390,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "topic_id": {"type": "number", "description": "Discussion topic ID"},
+                    "topic_id": {"type": "number", "description": "Discussion assignment ID or discussion topic ID (for graded discussions, use the assignment ID)"},
                     "user_id": {"type": "number", "description": "Student user ID to check"},
                 },
                 "required": ["topic_id", "user_id"],
@@ -670,8 +670,23 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             topic_id = arguments["topic_id"]
             user_id_filter = arguments.get("user_id")
 
-            # Get the discussion topic
-            topic = course.get_discussion_topic(topic_id)
+            # Try to get the discussion topic - first try as assignment ID, then as topic ID
+            topic = None
+            try:
+                # Try as assignment ID first (for graded discussions)
+                assignment = course.get_assignment(topic_id)
+                if hasattr(assignment, 'discussion_topic'):
+                    actual_topic_id = assignment.discussion_topic['id']
+                    topic = course.get_discussion_topic(actual_topic_id)
+            except:
+                pass
+
+            if not topic:
+                # Try as direct discussion topic ID
+                try:
+                    topic = course.get_discussion_topic(topic_id)
+                except:
+                    return [TextContent(type="text", text=f"Discussion topic with ID {topic_id} not found. Please verify the ID is correct.")]
 
             result = []
             result.append(f"DISCUSSION: {topic.title}")
@@ -776,8 +791,24 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             topic_id = arguments["topic_id"]
             user_id = arguments["user_id"]
 
-            # Get the discussion topic and find the student's post
-            topic = course.get_discussion_topic(topic_id)
+            # Try to get the discussion topic - first try as assignment ID, then as topic ID
+            topic = None
+            try:
+                # Try as assignment ID first (for graded discussions)
+                assignment = course.get_assignment(topic_id)
+                if hasattr(assignment, 'discussion_topic'):
+                    actual_topic_id = assignment.discussion_topic['id']
+                    topic = course.get_discussion_topic(actual_topic_id)
+            except:
+                pass
+
+            if not topic:
+                # Try as direct discussion topic ID
+                try:
+                    topic = course.get_discussion_topic(topic_id)
+                except:
+                    return [TextContent(type="text", text=f"Discussion topic with ID {topic_id} not found. Please verify the ID is correct.")]
+
             entries = topic.get_topic_entries()
 
             def strip_html(text):
