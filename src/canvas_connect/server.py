@@ -17,7 +17,7 @@ load_dotenv(env_path)
 
 # Rubrics for assignments
 RUBRICS = {
-    1027200: {  # Introductions: Are You Google or Microsoft? Android or iPhone?
+    1027382: {  # Introductions: Are You Google or Microsoft? Android or iPhone?
         "assignment_name": "Introductions: Are You Google or Microsoft? Android or iPhone?",
         "total_points": 100,
         "dimensions": [
@@ -63,7 +63,7 @@ RUBRICS = {
             }
         ]
     },
-    1027188: {  # DISCUSS: The IoT Discussion
+    1027378: {  # DISCUSS: The IoT Discussion
         "assignment_name": "The IoT Discussion",
         "total_points": 100,
         "dimensions": [
@@ -110,7 +110,7 @@ RUBRICS = {
             }
         ]
     },
-    1027194: {  # AI in our Future: A Student's Beginning Guide to Artificial Intelligence
+    1027381: {  # AI in our Future: A Student's Beginning Guide to Artificial Intelligence
         "assignment_name": "AI in our Future: A Student's Beginning Guide to Artificial Intelligence",
         "total_points": 100,
         "dimensions": [
