@@ -1,5 +1,6 @@
 """Canvas Connect MCP Server - Main server implementation."""
 
+import io
 import os
 import logging
 import re
@@ -177,6 +178,344 @@ app = Server("canvas-connect")
 # Global Canvas instance
 canvas_instance: Canvas | None = None
 course_instance: Course | None = None
+
+
+def _strip_html(text: str) -> str:
+    """Remove HTML tags from text."""
+    if not text:
+        return ""
+    return re.sub(r'<[^>]+>', '', text).strip()
+
+
+async def _download_canvas_file(url: str) -> bytes:
+    """Download a file from Canvas with API token authentication."""
+    import httpx
+    api_token = os.getenv("CANVAS_API_TOKEN")
+    async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
+        response = await client.get(url, headers={"Authorization": f"Bearer {api_token}"})
+        response.raise_for_status()
+        return response.content
+
+
+def _extract_docx_content(file_bytes: bytes) -> str:
+    """Extract text and structure from a Word (.docx) document."""
+    from docx import Document
+    doc = Document(io.BytesIO(file_bytes))
+
+    word_count = sum(len(p.text.split()) for p in doc.paragraphs if p.text.strip())
+    lines = [
+        f"WORD COUNT: ~{word_count}",
+        f"PARAGRAPHS: {len([p for p in doc.paragraphs if p.text.strip()])}",
+        f"SECTIONS: {len(doc.sections)}",
+        f"TABLES: {len(doc.tables)}",
+        "",
+        "=== DOCUMENT CONTENT ===",
+    ]
+
+    for para in doc.paragraphs:
+        if not para.text.strip():
+            continue
+        style_name = para.style.name if para.style else ""
+        if style_name.startswith("Heading"):
+            try:
+                level = int(style_name.split()[-1])
+                lines.append(f"\n{'#' * level} {para.text}")
+            except (ValueError, IndexError):
+                lines.append(f"\n## {para.text}")
+        else:
+            lines.append(para.text)
+
+    if doc.tables:
+        lines.append(f"\n=== TABLES ({len(doc.tables)} total) ===")
+        for i, table in enumerate(doc.tables[:5]):
+            lines.append(f"\nTable {i + 1}:")
+            for row in table.rows:
+                lines.append(" | ".join(cell.text.strip() for cell in row.cells))
+
+    return "\n".join(lines)
+
+
+def _extract_xlsx_content(file_bytes: bytes) -> str:
+    """Extract data and structure from an Excel (.xlsx) workbook."""
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    lines = [f"SHEETS: {', '.join(wb.sheetnames)}", ""]
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        lines.append(f"=== SHEET: {sheet_name} ===")
+        if ws.dimensions and ws.dimensions != "A1:A1":
+            lines.append(f"Data Range: {ws.dimensions}")
+        if hasattr(ws, "_charts") and ws._charts:
+            lines.append(f"Charts: {len(ws._charts)}")
+
+        row_count = 0
+        for row in ws.iter_rows(values_only=True):
+            if any(cell is not None for cell in row):
+                lines.append(" | ".join(str(v) if v is not None else "" for v in row))
+                row_count += 1
+                if row_count >= 75:
+                    lines.append("... (additional rows truncated)")
+                    break
+        lines.append("")
+
+    # Second pass to capture formulas (load_workbook with data_only=False)
+    try:
+        wb_f = openpyxl.load_workbook(io.BytesIO(file_bytes))
+        formulas = []
+        for sheet_name in wb_f.sheetnames:
+            ws = wb_f[sheet_name]
+            for row in ws.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str) and cell.value.startswith("="):
+                        formulas.append(f"  {sheet_name}!{cell.coordinate}: {cell.value}")
+                        if len(formulas) >= 30:
+                            break
+                if len(formulas) >= 30:
+                    break
+        if formulas:
+            lines.append("=== FORMULAS USED (sample) ===")
+            lines.extend(formulas)
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
+def _extract_pptx_content(file_bytes: bytes) -> str:
+    """Extract text and structure from a PowerPoint (.pptx) presentation."""
+    from pptx import Presentation
+
+    prs = Presentation(io.BytesIO(file_bytes))
+    lines = [
+        f"TOTAL SLIDES: {len(prs.slides)}",
+        f"SLIDE DIMENSIONS: {prs.slide_width.inches:.1f}\" x {prs.slide_height.inches:.1f}\"",
+        "",
+    ]
+
+    for i, slide in enumerate(prs.slides):
+        lines.append(f"=== SLIDE {i + 1} ===")
+        if slide.slide_layout and slide.slide_layout.name:
+            lines.append(f"Layout: {slide.slide_layout.name}")
+
+        title_text = slide.shapes.title.text if slide.shapes.title else None
+        if title_text:
+            lines.append(f"Title: {title_text}")
+
+        for shape in slide.shapes:
+            if not hasattr(shape, "text_frame") or not shape.text_frame:
+                continue
+            for para in shape.text_frame.paragraphs:
+                text = para.text.strip()
+                if text and text != title_text:
+                    lines.append(f"  • {text}")
+
+        if slide.has_notes_slide:
+            notes = slide.notes_slide.notes_text_frame.text.strip()
+            if notes:
+                lines.append(f"  [Notes: {notes[:300]}{'...' if len(notes) > 300 else ''}]")
+
+        image_count = sum(1 for shape in slide.shapes if shape.shape_type == 13)
+        if image_count:
+            lines.append(f"  [Images: {image_count}]")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _get_canvas_rubric(assignment) -> str | None:
+    """Extract a rubric from a Canvas assignment object, if one is attached."""
+    rubric = getattr(assignment, "rubric", None)
+    if not rubric:
+        return None
+
+    lines = []
+    total_points = 0
+    for criterion in rubric:
+        pts = criterion.get("points", 0)
+        total_points += pts
+        lines.append(f"\n{criterion.get('description', 'Criterion')} ({pts} pts)")
+        lines.append("-" * 40)
+        for rating in sorted(criterion.get("ratings", []), key=lambda r: r.get("points", 0), reverse=True):
+            desc = rating.get("description", "")
+            long_desc = rating.get("long_description", "")
+            label = f"{desc} - {long_desc}" if long_desc else desc
+            lines.append(f"  {rating.get('points', 0)} pts: {label}")
+
+    lines.append(f"\nTotal Points: {total_points}")
+    return "\n".join(lines)
+
+
+async def _grade_file_with_claude(
+    student_name: str,
+    file_name: str,
+    file_content: str,
+    assignment_name: str,
+    assignment_description: str,
+    rubric_text: str,
+    points_possible: float,
+) -> str:
+    """Send extracted file content to Claude for rubric-based grading."""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    max_chars = 8000
+    if len(file_content) > max_chars:
+        file_content = file_content[:max_chars] + "\n... [content truncated due to length]"
+
+    prompt = f"""You are grading a student's final project file submission for a college-level introductory computer applications course.
+
+ASSIGNMENT: {assignment_name}
+STUDENT: {student_name}
+FILE: {file_name}
+TOTAL POINTS POSSIBLE: {points_possible}
+
+ASSIGNMENT INSTRUCTIONS:
+{assignment_description or "(No description provided)"}
+
+GRADING RUBRIC:
+{rubric_text or "(No rubric found — grade based on the assignment instructions and general quality)"}
+
+STUDENT'S SUBMISSION CONTENT:
+{file_content}
+
+Grade this submission carefully using the rubric. Assign a score for each dimension and explain why. Then give an overall score and constructive feedback.
+
+Format your response EXACTLY as follows:
+
+DIMENSION SCORES:
+- [Dimension Name]: [Points Earned] / [Max Points] — [Brief justification]
+(repeat for each dimension)
+
+TOTAL SCORE: [X] / {points_possible}
+PERCENTAGE: [X]%
+LETTER GRADE: [A/B/C/D/F]
+
+STUDENT FEEDBACK:
+[3-5 sentences of specific, constructive feedback addressing strengths and areas for improvement.]"""
+
+    message = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=2048,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text
+
+
+def _rubric_text_from_dict(assignment_id: int) -> str | None:
+    """Return a formatted rubric string from the RUBRICS dict, if present."""
+    if assignment_id not in RUBRICS:
+        return None
+    rubric = RUBRICS[assignment_id]
+    lines = [f"RUBRIC: {rubric['assignment_name']}", f"Total Points: {rubric['total_points']}"]
+    for dim in rubric["dimensions"]:
+        lines.append(f"\n{dim['name']} ({dim['max_points']} pts)")
+        lines.append("-" * 40)
+        for pts in sorted(dim["level_exemplars"].keys(), key=int, reverse=True):
+            lines.append(f"  {pts} pts: {dim['level_exemplars'][pts][0]}")
+    return "\n".join(lines)
+
+
+async def _grade_submission(
+    course,
+    assignment,
+    submission,
+    student_name: str,
+    rubric_text: str | None,
+    assignment_description: str,
+    points_possible: float,
+    auto_update: bool,
+) -> list[str]:
+    """Download, extract, and grade all file attachments in a single submission."""
+    attachments = getattr(submission, "attachments", []) or []
+    if not attachments:
+        return [f"  No file attachments found — student may not have submitted a file."]
+
+    lines = []
+    for attachment in attachments:
+        file_name = getattr(attachment, "filename", "unknown")
+        file_url = getattr(attachment, "url", None)
+        file_size = getattr(attachment, "size", 0)
+
+        lines.append(f"\n  File: {file_name} ({file_size:,} bytes)")
+
+        if not file_url:
+            lines.append("  ERROR: No download URL available for this attachment.")
+            continue
+
+        try:
+            file_bytes = await _download_canvas_file(file_url)
+        except Exception as e:
+            lines.append(f"  ERROR downloading file: {e}")
+            continue
+
+        file_lower = file_name.lower()
+        try:
+            if file_lower.endswith(".docx"):
+                file_content = _extract_docx_content(file_bytes)
+                file_type = "Word Document"
+            elif file_lower.endswith(".xlsx"):
+                file_content = _extract_xlsx_content(file_bytes)
+                file_type = "Excel Spreadsheet"
+            elif file_lower.endswith(".pptx"):
+                file_content = _extract_pptx_content(file_bytes)
+                file_type = "PowerPoint Presentation"
+            elif file_lower.endswith((".doc", ".xls", ".ppt")):
+                lines.append(
+                    f"  WARNING: Legacy Office format (.doc/.xls/.ppt) not supported. "
+                    "Ask the student to re-submit in the modern format (.docx/.xlsx/.pptx)."
+                )
+                continue
+            else:
+                lines.append(f"  WARNING: Unsupported file type — cannot grade '{file_name}'.")
+                continue
+        except Exception as e:
+            lines.append(f"  ERROR extracting content from {file_name}: {e}")
+            continue
+
+        lines.append(f"  Type: {file_type}")
+
+        try:
+            grade_result = await _grade_file_with_claude(
+                student_name=student_name,
+                file_name=file_name,
+                file_content=file_content,
+                assignment_name=assignment.name,
+                assignment_description=assignment_description,
+                rubric_text=rubric_text or "",
+                points_possible=points_possible,
+            )
+        except Exception as e:
+            lines.append(f"  ERROR grading with Claude: {e}")
+            continue
+
+        lines.append("")
+        lines.append(grade_result)
+
+        if auto_update:
+            score_match = re.search(r"TOTAL SCORE:\s*(\d+(?:\.\d+)?)\s*/\s*\d+", grade_result)
+            if score_match:
+                score = float(score_match.group(1))
+                update_data: dict = {"posted_grade": str(score)}
+                feedback_match = re.search(
+                    r"STUDENT FEEDBACK:\n(.+?)(?:\n\n|\Z)", grade_result, re.DOTALL
+                )
+                if feedback_match:
+                    update_data["comment"] = {"text_comment": feedback_match.group(1).strip()}
+                try:
+                    submission.edit(submission=update_data)
+                    lines.append(f"\n  Grade updated in Canvas: {score}/{points_possible}")
+                except Exception as e:
+                    lines.append(f"\n  Could not update grade in Canvas: {e}")
+            else:
+                lines.append("\n  Could not parse score from Claude response to auto-update grade.")
+
+    return lines
 
 
 def get_canvas() -> Canvas:
@@ -394,6 +733,49 @@ async def list_tools() -> list[Tool]:
                     "user_id": {"type": "number", "description": "Student user ID to check"},
                 },
                 "required": ["topic_id", "user_id"],
+            },
+        ),
+
+        # File grading tools
+        Tool(
+            name="grade_file_submission",
+            description=(
+                "Download and AI-grade a single student's file submission (Word .docx, Excel .xlsx, or PowerPoint .pptx). "
+                "Fetches the assignment instructions and rubric from Canvas, extracts the document content, and uses "
+                "Claude to evaluate the work against the rubric. Optionally posts the grade back to Canvas."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "assignment_id": {"type": "number", "description": "Assignment ID"},
+                    "user_id": {"type": "number", "description": "Student user ID"},
+                    "auto_update_grade": {
+                        "type": "boolean",
+                        "description": "If true, automatically post the AI-recommended grade and feedback to Canvas",
+                        "default": False,
+                    },
+                },
+                "required": ["assignment_id", "user_id"],
+            },
+        ),
+        Tool(
+            name="grade_all_file_submissions",
+            description=(
+                "Download and AI-grade every student's file submission for an assignment (Word, Excel, or PowerPoint). "
+                "For each student who submitted a file, extracts content and grades it against the assignment rubric using Claude. "
+                "Returns a full report. Optionally posts grades back to Canvas. Note: may take several minutes for large classes."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "assignment_id": {"type": "number", "description": "Assignment ID"},
+                    "auto_update_grades": {
+                        "type": "boolean",
+                        "description": "If true, automatically post AI-recommended grades and feedback to Canvas for all students",
+                        "default": False,
+                    },
+                },
+                "required": ["assignment_id"],
             },
         ),
     ]
@@ -891,6 +1273,97 @@ SUMMARY: [2-3 sentence summary of your analysis]"""
             result.append("as one factor among many when evaluating student work.")
             result.append("=" * 60)
 
+            return [TextContent(type="text", text="\n".join(result))]
+
+        # File grading tools
+        elif name == "grade_file_submission":
+            assignment_id = arguments["assignment_id"]
+            user_id = arguments["user_id"]
+            auto_update = arguments.get("auto_update_grade", False)
+
+            assignment = course.get_assignment(assignment_id)
+            submission = assignment.get_submission(user_id)
+            user = course.get_user(user_id)
+
+            rubric_text = _rubric_text_from_dict(assignment_id) or _get_canvas_rubric(assignment)
+            assignment_description = _strip_html(getattr(assignment, "description", "") or "")
+            points_possible = float(getattr(assignment, "points_possible", 100) or 100)
+
+            result = [
+                f"GRADING: {user.name}",
+                f"Assignment: {assignment.name}",
+                f"Points Possible: {points_possible}",
+                "=" * 60,
+            ]
+
+            grade_lines = await _grade_submission(
+                course=course,
+                assignment=assignment,
+                submission=submission,
+                student_name=user.name,
+                rubric_text=rubric_text,
+                assignment_description=assignment_description,
+                points_possible=points_possible,
+                auto_update=auto_update,
+            )
+            result.extend(grade_lines)
+            return [TextContent(type="text", text="\n".join(result))]
+
+        elif name == "grade_all_file_submissions":
+            assignment_id = arguments["assignment_id"]
+            auto_update = arguments.get("auto_update_grades", False)
+
+            assignment = course.get_assignment(assignment_id)
+            submissions = list(assignment.get_submissions())
+
+            rubric_text = _rubric_text_from_dict(assignment_id) or _get_canvas_rubric(assignment)
+            assignment_description = _strip_html(getattr(assignment, "description", "") or "")
+            points_possible = float(getattr(assignment, "points_possible", 100) or 100)
+
+            result = [
+                "GRADING ALL SUBMISSIONS",
+                f"Assignment: {assignment.name}",
+                f"Points Possible: {points_possible}",
+                f"Total Submissions Found: {len(submissions)}",
+                "=" * 60,
+            ]
+
+            graded_count = 0
+            skipped_count = 0
+
+            for submission in submissions:
+                attachments = getattr(submission, "attachments", []) or []
+                if not attachments:
+                    skipped_count += 1
+                    continue
+
+                try:
+                    user = course.get_user(submission.user_id)
+                    student_name = user.name
+                except Exception:
+                    student_name = f"User {submission.user_id}"
+
+                result.append(f"\nStudent: {student_name} (ID: {submission.user_id})")
+                result.append("-" * 60)
+
+                grade_lines = await _grade_submission(
+                    course=course,
+                    assignment=assignment,
+                    submission=submission,
+                    student_name=student_name,
+                    rubric_text=rubric_text,
+                    assignment_description=assignment_description,
+                    points_possible=points_possible,
+                    auto_update=auto_update,
+                )
+                result.extend(grade_lines)
+                result.append("=" * 60)
+                graded_count += 1
+
+            result.append("")
+            result.append(f"SUMMARY: Graded {graded_count} student(s), skipped {skipped_count} (no file submission).")
+            if auto_update:
+                result.append("Grades have been posted to Canvas.")
             return [TextContent(type="text", text="\n".join(result))]
 
         else:
