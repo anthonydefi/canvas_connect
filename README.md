@@ -29,6 +29,13 @@ A Model Context Protocol (MCP) server for managing Canvas LMS courses. This serv
 - Get grading rubrics for assignments
 - AI writing detection to check for AI-generated student submissions
 
+### File Submission Grading
+- AI-powered grading of Word (.docx), Excel (.xlsx), and PowerPoint (.pptx) file submissions
+- Automatically fetches assignment instructions and rubric from Canvas
+- Extracts document content and evaluates it against the rubric using Claude
+- Grade a single student or all students in one pass
+- Optionally posts grades and feedback directly back to Canvas
+
 ## Setup
 
 ### 1. Install Dependencies
@@ -71,6 +78,7 @@ Edit `.env` with your information:
 CANVAS_API_URL=https://your-institution.instructure.com
 CANVAS_API_TOKEN=your_api_token_here
 CANVAS_COURSE_ID=your_course_id_here
+<<<<<<< HEAD
 CANVAS_COURSE_NAME=Section 1  # Optional label, shown by list_courses
 ANTHROPIC_API_KEY=your_anthropic_api_key_here  # Required for AI detection feature
 
@@ -84,8 +92,14 @@ If you set `CANVAS_COURSE_ID_2`, every tool accepts an optional `course_id` argu
 of the default. Run `list_courses` to see what's configured.
 
 ### 5. Get Anthropic API Key (Optional - for AI Detection)
+=======
+ANTHROPIC_API_KEY=your_anthropic_api_key_here  # Required for AI detection and file grading features
+```
 
-The AI writing detection feature requires an Anthropic API key:
+### 5. Get Anthropic API Key (Optional - for AI Detection & File Grading)
+>>>>>>> 18da1ebec02f2a805e5d3ad0d959ca453cd6eb65
+
+The AI writing detection and file submission grading features require an Anthropic API key:
 
 1. Go to [console.anthropic.com](https://console.anthropic.com/)
 2. Create an account or log in
@@ -94,7 +108,7 @@ The AI writing detection feature requires an Anthropic API key:
 5. Add credits to your account (Plans & Billing)
 6. Add the key to your `.env` file as `ANTHROPIC_API_KEY`
 
-**Note**: The AI detection feature uses Claude to analyze student posts. Each analysis costs a small amount of API credits.
+**Note**: These features use Claude to analyze student work. Each analysis costs a small amount of API credits.
 
 ### 6. Configure Claude Desktop
 
@@ -222,6 +236,21 @@ Returns:
 
 **Note**: This feature requires an Anthropic API key. See setup instructions above.
 
+### File Grading Tools
+
+#### `grade_file_submission`
+Download and AI-grade a single student's file submission (Word `.docx`, Excel `.xlsx`, or PowerPoint `.pptx`). Fetches the assignment instructions and rubric from Canvas, extracts the document content, and uses Claude to evaluate the work against the rubric.
+- **assignment_id** (required): Assignment ID
+- **user_id** (required): Student user ID
+- **auto_update_grade**: If `true`, automatically post the AI-recommended grade and feedback to Canvas (default: `false`)
+
+#### `grade_all_file_submissions`
+Download and AI-grade every student's file submission for an assignment (Word, Excel, or PowerPoint). For each student who submitted a file, extracts content and grades it against the assignment rubric using Claude. Returns a full report.
+- **assignment_id** (required): Assignment ID
+- **auto_update_grades**: If `true`, automatically post AI-recommended grades and feedback to Canvas for all students (default: `false`)
+
+**Note**: Grading a full class may take several minutes. Both tools require an Anthropic API key.
+
 ## Example Usage
 
 Once configured, you can ask Claude to help manage your course:
@@ -239,6 +268,9 @@ Once configured, you can ask Claude to help manage your course:
 - "Show me all the discussion posts for the Introductions discussion"
 - "Get the rubric for assignment 1027200"
 - "Check if student 127920 used AI to write their discussion post"
+- "Grade student 67890's Word document submission for assignment 12345"
+- "Grade all file submissions for assignment 12345 and show me the results"
+- "Grade all file submissions for assignment 12345 and automatically post the grades to Canvas"
 
 ## Security Notes
 
