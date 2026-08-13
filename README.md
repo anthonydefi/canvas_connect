@@ -71,8 +71,17 @@ Edit `.env` with your information:
 CANVAS_API_URL=https://your-institution.instructure.com
 CANVAS_API_TOKEN=your_api_token_here
 CANVAS_COURSE_ID=your_course_id_here
+CANVAS_COURSE_NAME=Section 1  # Optional label, shown by list_courses
 ANTHROPIC_API_KEY=your_anthropic_api_key_here  # Required for AI detection feature
+
+# Optional: teaching a second course (e.g. another section)?
+# CANVAS_COURSE_ID_2=your_second_course_id_here
+# CANVAS_COURSE_NAME_2=Section 2
 ```
+
+If you set `CANVAS_COURSE_ID_2`, every tool accepts an optional `course_id` argument
+(raw course ID, slot number `1`/`2`, or the label you set) to target that course instead
+of the default. Run `list_courses` to see what's configured.
 
 ### 5. Get Anthropic API Key (Optional - for AI Detection)
 
@@ -103,7 +112,8 @@ Add the server to your Claude Desktop configuration file:
       "env": {
         "CANVAS_API_URL": "https://your-institution.instructure.com",
         "CANVAS_API_TOKEN": "your_api_token_here",
-        "CANVAS_COURSE_ID": "your_course_id_here"
+        "CANVAS_COURSE_ID": "your_course_id_here",
+        "CANVAS_COURSE_ID_2": "your_second_course_id_here"
       }
     }
   }
@@ -117,6 +127,15 @@ Add the server to your Claude Desktop configuration file:
 After saving the configuration, restart Claude Desktop to load the MCP server.
 
 ## Available Tools
+
+Every tool below also accepts an optional **course_id** argument for selecting between
+multiple configured courses (see "Configure Environment Variables" above). Omit it to use
+the default course.
+
+### Course Tools
+
+#### `list_courses`
+List the Canvas courses configured for this server, with their IDs and names.
 
 ### Assignment Tools
 

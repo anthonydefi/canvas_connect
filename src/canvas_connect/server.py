@@ -177,7 +177,7 @@ app = Server("canvas-connect")
 
 # Global Canvas instance
 canvas_instance: Canvas | None = None
-course_instance: Course | None = None
+course_cache: dict[str, Course] = {}
 
 
 def _strip_html(text: str) -> str:
@@ -536,35 +536,83 @@ def get_canvas() -> Canvas:
     return canvas_instance
 
 
-def get_course() -> Course:
-    """Get or create Course instance."""
-    global course_instance
-    if course_instance is None:
-        canvas = get_canvas()
-        course_id = os.getenv("CANVAS_COURSE_ID")
+def _configured_courses() -> list[tuple[str, str, str]]:
+    """Return (slot, course_id, label) for every course configured via env vars."""
+    courses = []
+    slots = [
+        ("1", "CANVAS_COURSE_ID", "CANVAS_COURSE_NAME", "Primary"),
+        ("2", "CANVAS_COURSE_ID_2", "CANVAS_COURSE_NAME_2", "Secondary"),
+    ]
+    for slot, id_var, name_var, default_label in slots:
+        course_id = os.getenv(id_var)
+        if course_id:
+            label = os.getenv(name_var) or default_label
+            courses.append((slot, course_id, label))
+    return courses
 
-        if not course_id:
+
+def _resolve_course_id(course_id: int | str | None) -> str:
+    """Resolve a course_id argument (raw ID, slot number, or label) to a Canvas course ID."""
+    if course_id is None:
+        default_id = os.getenv("CANVAS_COURSE_ID")
+        if not default_id:
             raise ValueError(
                 "Missing course ID. Please set CANVAS_COURSE_ID environment variable."
             )
+        return default_id
 
-        course_instance = canvas.get_course(int(course_id))
-        logger.info(f"Loaded course: {course_instance.name}")
+    course_id_str = str(course_id).strip()
+    for slot, cid, label in _configured_courses():
+        if course_id_str == slot or course_id_str.lower() == label.lower() or course_id_str == cid:
+            return cid
 
-    return course_instance
+    return course_id_str
+
+
+def get_course(course_id: int | str | None = None) -> Course:
+    """Get or create a Course instance for the given course_id (or the default course)."""
+    global course_cache
+    resolved_id = _resolve_course_id(course_id)
+
+    if resolved_id not in course_cache:
+        canvas = get_canvas()
+        course_cache[resolved_id] = canvas.get_course(int(resolved_id))
+        logger.info(f"Loaded course: {course_cache[resolved_id].name} (ID: {resolved_id})")
+
+    return course_cache[resolved_id]
 
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List all available Canvas management tools."""
+    course_id_prop = {
+        "type": ["number", "string"],
+        "description": (
+            "Optional: which course to target when multiple courses are configured "
+            "(e.g. two sections of the same class). Accepts a raw Canvas course ID, "
+            "a slot number (1 or 2), or a course label. Use list_courses to see the "
+            "configured options. Defaults to the primary course (CANVAS_COURSE_ID)."
+        ),
+    }
+
     return [
+        # Course tools
+        Tool(
+            name="list_courses",
+            description="List the Canvas courses configured for this server (e.g. multiple sections of the same class), with their IDs and names.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+
         # Assignment tools
         Tool(
             name="list_assignments",
             description="List all assignments in the course with their details (name, due date, points, published status)",
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {"course_id": course_id_prop},
             },
         ),
         Tool(
@@ -578,6 +626,7 @@ async def list_tools() -> list[Tool]:
                     "points": {"type": "number", "description": "Points possible"},
                     "due_at": {"type": "string", "description": "Due date in ISO format (e.g., 2024-12-31T23:59:59)"},
                     "published": {"type": "boolean", "description": "Whether to publish immediately", "default": False},
+                    "course_id": course_id_prop,
                 },
                 "required": ["name", "points"],
             },
@@ -589,6 +638,7 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "assignment_id": {"type": "number", "description": "Assignment ID"},
+                    "course_id": course_id_prop,
                 },
                 "required": ["assignment_id"],
             },
@@ -603,6 +653,7 @@ async def list_tools() -> list[Tool]:
                     "user_id": {"type": "number", "description": "Student user ID"},
                     "grade": {"type": "string", "description": "Grade (number or letter)"},
                     "comment": {"type": "string", "description": "Optional comment"},
+                    "course_id": course_id_prop,
                 },
                 "required": ["assignment_id", "user_id", "grade"],
             },
@@ -614,7 +665,7 @@ async def list_tools() -> list[Tool]:
             description="List all students enrolled in the course",
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {"course_id": course_id_prop},
             },
         ),
         Tool(
@@ -624,6 +675,7 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "user_id": {"type": "number", "description": "Student user ID"},
+                    "course_id": course_id_prop,
                 },
                 "required": ["user_id"],
             },
@@ -633,7 +685,7 @@ async def list_tools() -> list[Tool]:
             description="Get a summary of all students with their current total grade/score in the course",
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {"course_id": course_id_prop},
             },
         ),
 
@@ -645,6 +697,7 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "limit": {"type": "number", "description": "Number of announcements to retrieve", "default": 10},
+                    "course_id": course_id_prop,
                 },
             },
         ),
@@ -657,6 +710,7 @@ async def list_tools() -> list[Tool]:
                     "title": {"type": "string", "description": "Announcement title"},
                     "message": {"type": "string", "description": "Announcement message (HTML supported)"},
                     "published": {"type": "boolean", "description": "Whether to publish immediately", "default": True},
+                    "course_id": course_id_prop,
                 },
                 "required": ["title", "message"],
             },
@@ -668,7 +722,7 @@ async def list_tools() -> list[Tool]:
             description="List all modules in the course",
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {"course_id": course_id_prop},
             },
         ),
         Tool(
@@ -678,6 +732,7 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "module_id": {"type": "number", "description": "Module ID"},
+                    "course_id": course_id_prop,
                 },
                 "required": ["module_id"],
             },
@@ -690,6 +745,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "name": {"type": "string", "description": "Module name"},
                     "published": {"type": "boolean", "description": "Whether to publish immediately", "default": False},
+                    "course_id": course_id_prop,
                 },
                 "required": ["name"],
             },
@@ -703,6 +759,7 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "assignment_id": {"type": "number", "description": "Assignment ID to get rubric for"},
+                    "course_id": course_id_prop,
                 },
                 "required": ["assignment_id"],
             },
@@ -717,6 +774,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "topic_id": {"type": "number", "description": "Discussion assignment ID or discussion topic ID (for graded discussions, use the assignment ID)"},
                     "user_id": {"type": "number", "description": "Optional: Filter to show only posts from a specific student"},
+                    "course_id": course_id_prop,
                 },
                 "required": ["topic_id"],
             },
@@ -731,6 +789,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "topic_id": {"type": "number", "description": "Discussion assignment ID or discussion topic ID (for graded discussions, use the assignment ID)"},
                     "user_id": {"type": "number", "description": "Student user ID to check"},
+                    "course_id": course_id_prop,
                 },
                 "required": ["topic_id", "user_id"],
             },
@@ -754,6 +813,7 @@ async def list_tools() -> list[Tool]:
                         "description": "If true, automatically post the AI-recommended grade and feedback to Canvas",
                         "default": False,
                     },
+                    "course_id": course_id_prop,
                 },
                 "required": ["assignment_id", "user_id"],
             },
@@ -774,6 +834,7 @@ async def list_tools() -> list[Tool]:
                         "description": "If true, automatically post AI-recommended grades and feedback to Canvas for all students",
                         "default": False,
                     },
+                    "course_id": course_id_prop,
                 },
                 "required": ["assignment_id"],
             },
@@ -785,7 +846,20 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     """Handle tool calls for Canvas operations."""
     try:
-        course = get_course()
+        if name == "list_courses":
+            configured = _configured_courses()
+            if not configured:
+                return [TextContent(type="text", text="No courses configured.")]
+            result = []
+            for slot, course_id, label in configured:
+                try:
+                    c = get_course(course_id)
+                    result.append(f"Slot {slot}: {label} — {c.name} (ID: {course_id})")
+                except Exception as e:
+                    result.append(f"Slot {slot}: {label} (ID: {course_id}) — ERROR: {e}")
+            return [TextContent(type="text", text="\n".join(result))]
+
+        course = get_course(arguments.get("course_id"))
 
         # Assignment tools
         if name == "list_assignments":
